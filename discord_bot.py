@@ -18,10 +18,11 @@ tracking = False
 @bot.tree.command(name="flight_checker", description="show flights in air around chosen location")
 @app_commands.describe(coords="input coordinates")
 async def flight_checker(interaction: discord.Interaction, coords: str):
-    if not interaction.response.is_done():
-        await interaction.response.send_message("Checking flights...")
+    await interaction.response.defer(thinking=False)
 
-    await track_flights(interaction, coords)
+    embed = build_flight_embed(coords)
+    if embed is not None:
+        await interaction.followup.send(interaction.user.mention, embed=embed)
 
 
 @bot.tree.command(name="start_tracker", description="starts tracking flights and pings user whenever a flight is about to come overhead")
@@ -29,7 +30,7 @@ async def start_tracker(interaction: discord.Interaction, coords: str):
     global tracking
     tracking = True
     await interaction.response.send_message(f"Tracking started for following coordinates: {coords}")
-    await track_flights(interaction, coords)
+    bot.loop.create_task(track_flights(interaction.channel, coords, interaction.user.mention))
 
 @bot.tree.command(name="ends_tracker", description="ends flight tracking")
 async def end_tracker(interaction: discord.Interaction):
@@ -37,23 +38,36 @@ async def end_tracker(interaction: discord.Interaction):
     tracking = False
     await interaction.response.send_message("Tracking ended")
 
-async def track_flights(interaction: discord.Interaction, coords: str):
+def build_flight_embed(coords: str):
+    parts = coords.split(",")
+    coords_x = float(parts[0])
+    coords_y = float(parts[1])
+    radius = float(parts[2])
+    flights_info = flights.check_flights(coords_x, coords_y, radius)
+
+    if not flights_info:
+        return None
+
+    embed = discord.Embed(title=f"{len(flights_info)} flight(s) nearby")
+
+    for flight in flights_info[:10]:
+        embed.add_field(
+            name=flight["callsign"],
+            value=(
+                f"Aircraft: {flight['type']} / {flight['registration']}\n"
+                f"Altitude: {flight['altitude']} ft\n"
+                f"Speed: {flight['knots']} knots"
+            ),
+            inline=False,
+        )
+    return embed
+
+
+async def track_flights(channel: discord.abc.Messageable, coords: str, user_mention: str):
     while tracking:
-        embed = discord.Embed(title="Flight information:")
-        comma_pos = coords.find(",")
-        coords_x = float(coords[:comma_pos])
-        coords_y = float(coords[comma_pos + 2:])
-        flights_info = flights.check_flights(coords_x, coords_y)
-
-        if flights_info:
-            embed.add_field(name="Flight: ", value=flights_info["callsign"], inline=False)
-            embed.add_field(name="Aircraft: ", value=f"{flights_info['type']} / {flights_info['registration']}", inline=False)
-            embed.add_field(name="Altitude: ", value=f"{flights_info['altitude']} ft", inline=False)
-            embed.add_field(name="Speed: ", value=f"{flights_info['knots']} knots", inline=False)
-        else:
-            embed.add_field(name="Error", value="No Flights Found", inline=False)
-
-        await interaction.followup.send("@bai13l", embed=embed)
+        embed = build_flight_embed(coords)
+        if embed is not None:
+            await channel.send(user_mention, embed=embed)
         await asyncio.sleep(180)
 
 
