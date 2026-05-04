@@ -14,6 +14,7 @@ intents = discord.Intents.default()
 bot = commands.Bot(command_prefix="!", intents=intents)
 
 tracking = False
+tracker_task = None
 
 @bot.tree.command(name="flight_checker", description="show flights in air around chosen location")
 @app_commands.describe(coords="input coordinates")
@@ -27,15 +28,25 @@ async def flight_checker(interaction: discord.Interaction, coords: str):
 
 @bot.tree.command(name="start_tracker", description="starts tracking flights and pings user whenever a flight is about to come overhead")
 async def start_tracker(interaction: discord.Interaction, coords: str):
-    global tracking
+    global tracking, tracker_task
+    if tracker_task is not None and not tracker_task.done():
+        await interaction.response.send_message("Tracker is already running")
+        return
+
     tracking = True
     await interaction.response.send_message(f"Tracking started for following coordinates: {coords}")
-    bot.loop.create_task(track_flights(interaction.channel, coords, interaction.user.mention))
+    tracker_task = bot.loop.create_task(track_flights(interaction.channel, coords, interaction.user.mention))
 
 @bot.tree.command(name="ends_tracker", description="ends flight tracking")
 async def end_tracker(interaction: discord.Interaction):
-    global tracking
+    global tracking, tracker_task
+    if tracker_task is None or tracker_task.done():
+        await interaction.response.send_message("No tracker is currently running")
+        return
+
     tracking = False
+    tracker_task.cancel()
+    tracker_task = None
     await interaction.response.send_message("Tracking ended")
 
 def build_flight_embed(coords: str):
@@ -64,11 +75,19 @@ def build_flight_embed(coords: str):
 
 
 async def track_flights(channel: discord.abc.Messageable, coords: str, user_mention: str):
-    while tracking:
-        embed = build_flight_embed(coords)
-        if embed is not None:
-            await channel.send(user_mention, embed=embed)
-        await asyncio.sleep(180)
+    global tracking, tracker_task
+    try:
+        while tracking:
+            embed = build_flight_embed(coords)
+            if embed is not None:
+                await channel.send(user_mention, embed=embed)
+            await asyncio.sleep(180)
+    except asyncio.CancelledError:
+        pass
+    finally:
+        if tracker_task is asyncio.current_task():
+            tracking = False
+            tracker_task = None
 
 
 
