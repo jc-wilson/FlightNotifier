@@ -41,8 +41,8 @@ async def end_tracker(interaction: discord.Interaction):
 def build_flight_embed(coords: str):
     parts = coords.split(",")
     coords_x = float(parts[0])
-    coords_y = float(parts[1])
-    radius = float(parts[2])
+    coords_y = float(parts[1][1:])
+    radius = float(parts[2][1:])
     flights_info = flights.check_flights(coords_x, coords_y, radius)
 
     if not flights_info:
